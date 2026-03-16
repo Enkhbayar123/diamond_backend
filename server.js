@@ -288,7 +288,7 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     // Make sure this matches the working model name you found earlier!
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" }); 
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
 
     const prompt = `
       Та бол хүний нөөцийн ментор. 
