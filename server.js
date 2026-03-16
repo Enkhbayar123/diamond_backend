@@ -281,6 +281,31 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
   }
 });
 
+// --- INDIVIDUAL AI RECOMMENDATION ROUTE (Supervisor Only) ---
+app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
+  const { employeeName, detailsData } = req.body;
+
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // Make sure this matches the working model name you found earlier!
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" }); 
+
+    const prompt = `
+      Та бол хүний нөөцийн ментор. 
+      Ажилтан ${employeeName}-ийн ур чадварын дэлгэрэнгүй үзүүлэлт:
+      ${JSON.stringify(detailsData, null, 2)}
+      
+      Энэхүү дата дээр үндэслэн ажилтны давуу тал болон сайжруулах шаардлагатай зүйлс дээр мэргэжлийн, урам зориг өгсөн 4-5 өгүүлбэртэй зөвлөмжийг монгол хэлээр бичиж өгнө үү.
+    `;
+
+    const result = await model.generateContent(prompt);
+    res.json({ advice: result.response.text() });
+  } catch (error) {
+    console.error("Individual AI Error:", error);
+    res.status(500).json({ error: 'Хиймэл оюунтай холбогдоход алдаа гарлаа.' });
+  }
+});
+
 
 // --- GENERAL LOGGED-IN USER ROUTES ---
 
