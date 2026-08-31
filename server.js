@@ -17,6 +17,10 @@ app.use(express.json()); // Parse JSON bodies
 app.use(cors());         // Allow React to talk to this server
 
 // 3. Connect to MongoDB
+if (!process.env.MONGO_URI) {
+  console.error('❌ FATAL: MONGO_URI environment variable is missing!');
+}
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error('❌ MongoDB Connection Error:', err));
@@ -25,11 +29,7 @@ mongoose.connect(process.env.MONGO_URI)
 //               DATABASE MODELS
 // ==========================================
 
-// ==========================================
-//               DATABASE MODELS
-// ==========================================
-
-// --- NEW: Company Model ---
+// --- Company Model ---
 const CompanySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
   affiliations: [{ type: String }], // Хэлтэс, салбар (e.g., ["HR", "IT", "Sales"])
@@ -38,7 +38,7 @@ const CompanySchema = new mongoose.Schema({
 });
 const Company = mongoose.model('Company', CompanySchema);
 
-// --- UPDATED: User Model ---
+// --- User Model ---
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
@@ -46,14 +46,14 @@ const UserSchema = new mongoose.Schema({
   name: { type: String },
   supervisorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   
-  // New Company Fields
+  // Company Fields
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
   affiliation: { type: String, default: '' },
   position: { type: String, default: '' }
 });
 const User = mongoose.model('User', UserSchema);
 
-// B. Inquiry Model (Contact Form)
+// --- Inquiry Model (Contact Form) ---
 const InquirySchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true },
@@ -62,7 +62,7 @@ const InquirySchema = new mongoose.Schema({
 });
 const Inquiry = mongoose.model('Inquiry', InquirySchema);
 
-// C. Test Result Model (History)
+// --- Test Result Model (History) ---
 const TestResultSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   date: { type: Date, default: Date.now },
@@ -105,6 +105,22 @@ const requireRole = (roles) => {
   };
 };
 
+// Helper: AI Request Retry Wrapper for temporary 503 / 429 overloads
+async function generateAIContentWithRetry(model, prompt, maxRetries = 3, delayMs = 1500) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (error) {
+      if ((error.status === 503 || error.status === 429) && attempt < maxRetries) {
+        console.warn(`Gemini API busy (status ${error.status}). Retrying in ${delayMs * attempt}ms... (Attempt ${attempt}/${maxRetries})`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 
 // ==========================================
 //                 API ROUTES
@@ -116,6 +132,15 @@ const requireRole = (roles) => {
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ message: 'Өгөгдлийн сантай холбогдож чадсангүй. Түр хүлээнэ үү.' });
+  }
+
+  if (!process.env.JWT_SECRET) {
+    console.error('❌ FATAL: JWT_SECRET environment variable is missing!');
+    return res.status(500).json({ message: 'Серверийн тохиргооны алдаа (JWT_SECRET байхгүй).' });
+  }
+
   try {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: 'Хэрэглэгч олдсонгүй' });
@@ -123,13 +148,18 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Нууц үг буруу байна' });
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
 
     res.json({ 
       token, 
       user: { id: user._id, name: user.name, role: user.role } 
     });
   } catch (err) {
+    console.error('Login Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -148,7 +178,7 @@ app.post('/api/inquiry', async (req, res) => {
 
 // --- PROTECTED ADMIN ROUTES ---
 
-// REGISTER USER (Admin Only) - UPDATED
+// REGISTER USER (Admin Only)
 app.post('/api/register', verifyToken, requireRole(['admin']), async (req, res) => {
   const { email, password, name, role, supervisorId, companyId, affiliation, position } = req.body;
 
@@ -160,7 +190,10 @@ app.post('/api/register', verifyToken, requireRole(['admin']), async (req, res) 
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newUser = new User({
-      email, password: hashedPassword, name, role,
+      email,
+      password: hashedPassword,
+      name,
+      role,
       supervisorId: role === 'student' ? supervisorId : null,
       companyId: companyId || null,
       affiliation: affiliation || '',
@@ -198,13 +231,13 @@ app.get('/api/companies', verifyToken, requireRole(['admin']), async (req, res) 
   }
 });
 
-// GET ALL USERS (Admin Only) - UPDATED
+// GET ALL USERS (Admin Only)
 app.get('/api/users', verifyToken, requireRole(['admin']), async (req, res) => {
   try {
     const users = await User.find()
       .select('-password')
       .populate('supervisorId', 'name')
-      .populate('companyId', 'name') // Pulls the company name from the DB
+      .populate('companyId', 'name')
       .sort({ _id: -1 });
     res.json(users);
   } catch (err) {
@@ -212,7 +245,7 @@ app.get('/api/users', verifyToken, requireRole(['admin']), async (req, res) => {
   }
 });
 
-// 5. DELETE USER (Admin Only)
+// DELETE USER (Admin Only)
 app.delete('/api/users/:id', verifyToken, requireRole(['admin']), async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);
@@ -222,7 +255,7 @@ app.delete('/api/users/:id', verifyToken, requireRole(['admin']), async (req, re
   }
 });
 
-// 6. GET INQUIRIES (Admin Only)
+// GET INQUIRIES (Admin Only)
 app.get('/api/inquiries', verifyToken, requireRole(['admin']), async (req, res) => {
   try {
     const messages = await Inquiry.find().sort({ date: -1 });
@@ -235,7 +268,7 @@ app.get('/api/inquiries', verifyToken, requireRole(['admin']), async (req, res) 
 
 // --- PROTECTED SUPERVISOR & ADMIN ROUTES ---
 
-// 7. GET LIST OF SUPERVISORS (For Dropdowns)
+// GET LIST OF SUPERVISORS (For Dropdowns)
 app.get('/api/supervisors-list', verifyToken, requireRole(['admin', 'supervisor']), async (req, res) => {
   try {
     const supervisors = await User.find({ role: 'supervisor' }).select('name _id');
@@ -245,7 +278,7 @@ app.get('/api/supervisors-list', verifyToken, requireRole(['admin', 'supervisor'
   }
 });
 
-// 8. GET MY EMPLOYEES (Supervisor Only)
+// GET MY EMPLOYEES (Supervisor Only)
 app.get('/api/my-employees/:supervisorId', verifyToken, requireRole(['supervisor']), async (req, res) => {
   try {
     const employees = await User.find({ supervisorId: req.params.supervisorId }).select('-password');
@@ -259,10 +292,13 @@ app.get('/api/my-employees/:supervisorId', verifyToken, requireRole(['supervisor
 app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
   const { teamStats } = req.body;
 
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY тохируулагдаагүй байна.' });
+  }
+
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // Use the model name you found from your diagnostic script!
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" }); 
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       Та бол байгууллагын хүний нөөц, манлайллын чиглэлээр мэргэшсэн ментор юм. 
@@ -273,7 +309,7 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
       Уг багийн удирдагчид зориулан багийн давуу болон сул талыг дүгнэж, цаашид багаа хэрхэн чиглүүлэх, ямар сургалт хөгжлийн хөтөлбөр хэрэгжүүлэх талаар 1 цогц, маш мэргэжлийн, монгол хэлээр зөвлөмж бичиж өгнө үү. Урт нь 5-6 өгүүлбэр байхад хангалттай.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateAIContentWithRetry(model, prompt);
     res.json({ advice: result.response.text() });
   } catch (error) {
     console.error("Team AI Error:", error);
@@ -285,10 +321,13 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
 app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
   const { employeeName, detailsData } = req.body;
 
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY тохируулагдаагүй байна.' });
+  }
+
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // Make sure this matches the working model name you found earlier!
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" }); 
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       Та бол хүний нөөцийн ментор. 
@@ -298,7 +337,7 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
       Энэхүү дата дээр үндэслэн ажилтны давуу тал болон сайжруулах шаардлагатай зүйлс дээр мэргэжлийн, урам зориг өгсөн 4-5 өгүүлбэртэй зөвлөмжийг монгол хэлээр бичиж өгнө үү.
     `;
 
-    const result = await model.generateContent(prompt);
+    const result = await generateAIContentWithRetry(model, prompt);
     res.json({ advice: result.response.text() });
   } catch (error) {
     console.error("Individual AI Error:", error);
@@ -309,7 +348,7 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
 
 // --- GENERAL LOGGED-IN USER ROUTES ---
 
-// 10. SAVE TEST RESULT (Any logged-in user)
+// SAVE TEST RESULT (Any logged-in user)
 app.post('/api/test-results', verifyToken, async (req, res) => {
   try {
     const { userId, overallData, detailsData } = req.body;
@@ -331,7 +370,7 @@ app.post('/api/test-results', verifyToken, async (req, res) => {
   }
 });
 
-// 11. GET HISTORY FOR A USER (Any logged-in user)
+// GET HISTORY FOR A USER (Any logged-in user)
 app.get('/api/test-results/:userId', verifyToken, async (req, res) => {
   try {
     const results = await TestResult.find({ userId: req.params.userId }).sort({ date: -1 });
