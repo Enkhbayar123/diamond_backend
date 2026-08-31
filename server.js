@@ -298,7 +298,7 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
       Та бол байгууллагын хүний нөөц, манлайллын чиглэлээр мэргэшсэн ментор юм. 
@@ -327,7 +327,7 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
       Та бол хүний нөөцийн ментор. 
