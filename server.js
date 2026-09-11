@@ -288,7 +288,7 @@ app.get('/api/my-employees/:supervisorId', verifyToken, requireRole(['supervisor
   }
 });
 
-// --- AI TEAM RECOMMENDATION ROUTE (Supervisor Only) ---
+// --- AI TEAM/CLASS RECOMMENDATION ROUTE (Supervisor/Mentor Only) ---
 app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
   const { teamStats } = req.body;
 
@@ -301,14 +301,14 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
-      Та бол боловсролын удирдлага, сургалтын чанарын чиглэлээр мэргэшсэн зөвлөх юм.
-      Нийт багш нарын тестийн нэгтгэсэн дүн (хамт олны дундаж үзүүлэлт):
+      Та бол оюутан, сурагчдын сурлагын хөгжил, карьер чиглүүлэлтийн туршлагатай ментор юм.
+      Нийт оюутнуудын тестийн нэгтгэсэн дүн (анги хамт олны дундаж үзүүлэлт):
       ${JSON.stringify(teamStats, null, 2)}
     
-      Сургуулийн удирдлага, тэнхимийн эрхлэгчид зориулан 5-6 өгүүлбэрт багтаан мэргэжлийн түвшинд монгол хэлээр зөвлөмж бичнэ үү. Зөвлөмжид:
-      1. Багшлах бүрэлдэхүүний ерөнхий давуу тал, арга барилын онцлогийг тодорхойлох;
-      2. Багш нарын ур чадварыг ахиулахад ямар сургалт, арга зүйн хөтөлбөр хэрэгжүүлэх шаардлагатайг тусгах;
-      3. Сургалтын таатай орчин, хамтын ажиллагааг сайжруулах практик зөвлөгөө өгөх.
+      Сургалтын алба, чиглүүлэгч багш, менторуудад зориулан 5-6 өгүүлбэрт багтаан мэргэжлийн түвшинд монгол хэлээр зөвлөмж бичнэ үү. Зөвлөмжид:
+      1. Нийт оюутнуудын суралцах арга барил, суурь давуу талуудыг нэгтгэн дүгнэх;
+      2. Оюутнуудын мэдлэг, ур чадварыг ахиулахад чиглэсэн нэмэлт хөтөлбөр, дадлага сургуулилтыг санал болгох;
+      3. Суралцах идэвх санаачилга, багаар ажиллах чадварыг дэмжих практик зөвлөгөө өгөх.
     `;
 
     const result = await generateAIContentWithRetry(model, prompt);
@@ -319,9 +319,9 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
   }
 });
 
-// --- INDIVIDUAL AI RECOMMENDATION ROUTE (Supervisor Only) ---
+// --- INDIVIDUAL AI RECOMMENDATION ROUTE (Supervisor/Mentor Only) ---
 app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
-  const { employeeName, detailsData } = req.body;
+  const { employeeName, detailsData } = req.body; // You can also rename employeeName to studentName in frontend and backend
 
   if (!process.env.GEMINI_API_KEY) {
     return res.status(500).json({ error: 'GEMINI_API_KEY тохируулагдаагүй байна.' });
@@ -332,15 +332,15 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
-      Та бол боловсролын салбарын туршлагатай арга зүйч, багшийн хөгжлийн ментор юм.
-      Багш: ${employeeName}
-      Багшийн үнэлгээ, ур чадварын дэлгэрэнгүй үзүүлэлт:
+      Та бол оюутан, сурагчдын хувь хүний хөгжил, суралцах арга барилыг чиглүүлэгч туршлагатай ментор юм.
+      Оюутан: ${employeeName}
+      Оюутны үнэлгээ, ур чадварын дэлгэрэнгүй үзүүлэлт:
       ${JSON.stringify(detailsData, null, 2)}
     
-      Энэхүү үнэлгээнд тулгуурлан багшид зориулсан мэргэжлийн, урам зориг өгсөн 4-5 өгүүлбэртэй зөвлөмж бичиж өгнө үү. Зөвлөмжид:
-      1. Багшийн заах арга барил болон харилцааны гол давуу талыг дурдах;
-      2. Сургалтын чанарыг сайжруулахад анхаарах боломжит чиглэлийг эелдэгээр зөвлөх;
-      3. Сурган хүмүүжүүлэх ажилд нь урам зориг өгсөн үгээр төгсгөх.
+      Энэхүү үнэлгээнд тулгуурлан оюутанд зориулсан мэргэжлийн, урам зориг өгсөн 4-5 өгүүлбэртэй зөвлөмж бичиж өгнө үү. Зөвлөмжид:
+      1. Оюутны давуу тал, суралцах арга барилын онцлогийг дурдах;
+      2. Цаашид сайжруулах, илүү анхаарах шаардлагатай чадвар болон хичээлийн чиглэлийг эелдэгээр зөвлөх;
+      3. Цаашдын сурлага, хөгжилд нь урам зориг, итгэл өгсөн үгээр төгсгөх.
       Бүх хариултыг цэвэр монгол хэлээр бичнэ үү.
     `;
 
@@ -351,7 +351,6 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
     res.status(500).json({ error: 'Хиймэл оюунтай холбогдоход алдаа гарлаа.' });
   }
 });
-
 
 // --- GENERAL LOGGED-IN USER ROUTES ---
 
