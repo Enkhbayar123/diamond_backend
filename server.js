@@ -105,21 +105,30 @@ const requireRole = (roles) => {
   };
 };
 
-// Helper: AI Request with Fallback Models for 503 / 429 overloads
-async function generateAIContentWithFallback(genAI, prompt, candidateModels = ['gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-3.5-flash']) {
+// Helper: Tries verified available models sequentially if 503 or 404 occurs
+async function generateAIContentWithFallback(
+  genAI,
+  prompt,
+  candidateModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-pro']
+) {
   let lastError;
   for (const modelName of candidateModels) {
     try {
+      console.log(`🤖 Attempting generation with model: ${modelName}...`);
       const model = genAI.getGenerativeModel({ model: modelName });
-      return await model.generateContent(prompt);
+      const result = await model.generateContent(prompt);
+      console.log(`✅ Success with model: ${modelName}`);
+      return result;
     } catch (error) {
       lastError = error;
-      if (error.status === 503 || error.status === 429) {
-        console.warn(`⚠️ Model ${modelName} returned status ${error.status}. Trying next available model...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      console.warn(`⚠️ Model ${modelName} failed (status ${error.status}): ${error.message}`);
+      
+      // Fall through to next model if unavailable (404), temporarily busy (503), or throttled (429)
+      if (error.status === 404 || error.status === 503 || error.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
         continue;
       }
-      throw error; // Throw immediately if it is a client error (e.g., bad key)
+      throw error;
     }
   }
   throw lastError;
