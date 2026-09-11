@@ -105,20 +105,24 @@ const requireRole = (roles) => {
   };
 };
 
-// Helper: AI Request Retry Wrapper for temporary 503 / 429 overloads
-async function generateAIContentWithRetry(model, prompt, maxRetries = 3, delayMs = 1500) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+// Helper: AI Request with Fallback Models for 503 / 429 overloads
+async function generateAIContentWithFallback(genAI, prompt, candidateModels = ['gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-3.5-flash']) {
+  let lastError;
+  for (const modelName of candidateModels) {
     try {
+      const model = genAI.getGenerativeModel({ model: modelName });
       return await model.generateContent(prompt);
     } catch (error) {
-      if ((error.status === 503 || error.status === 429) && attempt < maxRetries) {
-        console.warn(`Gemini API busy (status ${error.status}). Retrying in ${delayMs * attempt}ms... (Attempt ${attempt}/${maxRetries})`);
-        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+      lastError = error;
+      if (error.status === 503 || error.status === 429) {
+        console.warn(`⚠️ Model ${modelName} returned status ${error.status}. Trying next available model...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         continue;
       }
-      throw error;
+      throw error; // Throw immediately if it is a client error (e.g., bad key)
     }
   }
+  throw lastError;
 }
 
 
@@ -298,7 +302,6 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
       Та бол оюутан, сурагчдын сурлагын хөгжил, карьер чиглүүлэлтийн туршлагатай ментор юм.
@@ -311,17 +314,20 @@ app.post('/api/generate-team-advice', verifyToken, requireRole(['supervisor', 'a
       3. Суралцах идэвх санаачилга, багаар ажиллах чадварыг дэмжих практик зөвлөгөө өгөх.
     `;
 
-    const result = await generateAIContentWithRetry(model, prompt);
+    const result = await generateAIContentWithFallback(genAI, prompt);
     res.json({ advice: result.response.text() });
   } catch (error) {
     console.error("Team AI Error:", error);
+    if (error.status === 429) {
+      return res.status(429).json({ error: 'Хиймэл оюуны хандалтын хязгаар дууссан байна. Түр хүлээнэ үү.' });
+    }
     res.status(500).json({ error: 'Хиймэл оюунтай холбогдоход алдаа гарлаа.' });
   }
 });
 
 // --- INDIVIDUAL AI RECOMMENDATION ROUTE (Supervisor/Mentor Only) ---
 app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin']), async (req, res) => {
-  const { employeeName, detailsData } = req.body; // You can also rename employeeName to studentName in frontend and backend
+  const { employeeName, detailsData } = req.body;
 
   if (!process.env.GEMINI_API_KEY) {
     return res.status(500).json({ error: 'GEMINI_API_KEY тохируулагдаагүй байна.' });
@@ -329,7 +335,6 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
       Та бол оюутан, сурагчдын хувь хүний хөгжил, суралцах арга барилыг чиглүүлэгч туршлагатай ментор юм.
@@ -344,13 +349,17 @@ app.post('/api/generate-advice', verifyToken, requireRole(['supervisor', 'admin'
       Бүх хариултыг цэвэр монгол хэлээр бичнэ үү.
     `;
 
-    const result = await generateAIContentWithRetry(model, prompt);
+    const result = await generateAIContentWithFallback(genAI, prompt);
     res.json({ advice: result.response.text() });
   } catch (error) {
     console.error("Individual AI Error:", error);
+    if (error.status === 429) {
+      return res.status(429).json({ error: 'Хиймэл оюуны хандалтын хязгаар дууссан байна. Түр хүлээнэ үү.' });
+    }
     res.status(500).json({ error: 'Хиймэл оюунтай холбогдоход алдаа гарлаа.' });
   }
 });
+
 
 // --- GENERAL LOGGED-IN USER ROUTES ---
 
