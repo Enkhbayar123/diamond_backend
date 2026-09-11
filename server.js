@@ -404,6 +404,36 @@ app.get('/api/test-results/:userId', verifyToken, async (req, res) => {
   }
 });
 
+// --- TEMPORARY PASSWORD RESET ROUTE ---
+app.get('/api/dev-reset-admin', async (req, res) => {
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash('admin123', salt);
+
+    const user = await User.findOneAndUpdate(
+      { email: 'admin@diamond.mn' },
+      { 
+        $set: { 
+          password: hashedPassword,
+          role: 'admin',
+          name: 'Admin User'
+        } 
+      },
+      { upsert: true, new: true }
+    );
+
+    res.json({
+      success: true,
+      message: 'Admin account created/updated successfully with native bcrypt!',
+      email: user.email,
+      role: user.role
+    });
+  } catch (err) {
+    console.error('Reset Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
 //               START SERVER
 // ==========================================
